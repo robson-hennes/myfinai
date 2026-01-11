@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { calculateMRR } from "@/lib/billing";
 import Link from "next/link";
 
 export default function Dashboard() {
@@ -42,10 +43,7 @@ export default function Dashboard() {
 
     let revenue = 0;
     services?.forEach(s => {
-      if (s.recurrence === 'monthly') revenue += Number(s.amount);
-      else if (s.recurrence === 'quarterly') revenue += Number(s.amount) / 3;
-      else if (s.recurrence === 'semiannual') revenue += Number(s.amount) / 6;
-      else if (s.recurrence === 'annual') revenue += Number(s.amount) / 12;
+      revenue += calculateMRR(Number(s.amount), s.recurrence as any);
     });
 
     // 3. Fetch recent transactions (dummy for now as we haven't implemented logic to populate it yet)
