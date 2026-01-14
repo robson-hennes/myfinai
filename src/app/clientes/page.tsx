@@ -21,7 +21,7 @@ import Link from "next/link";
 
 interface Client {
     id: string;
-    id: string;
+
     name: string; // Company Name
     contact_name: string | null; // Contact Person
     email: string | null;

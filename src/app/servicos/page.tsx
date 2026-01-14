@@ -44,6 +44,7 @@ export default function ServicesPage() {
         amount: "",
         recurrence: "monthly",
         is_active: true,
+        installments: "1",
         next_billing_date: new Date().toISOString().split('T')[0]
     });
 
@@ -113,6 +114,7 @@ export default function ServicesPage() {
                     amount: parseFloat(newService.amount),
                     recurrence: newService.recurrence,
                     is_active: newService.is_active,
+                    installments: newService.recurrence === 'installment' ? parseInt(newService.installments) : null,
                     next_billing_date: newService.next_billing_date
                 }
             ])
@@ -126,12 +128,39 @@ export default function ServicesPage() {
         } else {
             setServices([data[0] as any, ...services]);
             setIsAdding(false);
+
+            // Generate transactions if installment
+            if (newService.recurrence === 'installment') {
+                const serviceId = data[0].id;
+                const amount = parseFloat(newService.amount);
+                const count = parseInt(newService.installments);
+                const startDate = new Date(newService.next_billing_date);
+
+                const transactions = [];
+                for (let i = 0; i < count; i++) {
+                    const dueDate = new Date(startDate);
+                    dueDate.setMonth(dueDate.getMonth() + i);
+
+                    transactions.push({
+                        service_id: serviceId,
+                        client_id: newService.client_id,
+                        amount: amount,
+                        due_date: dueDate.toISOString().split('T')[0],
+                        status: 'pending'
+                    });
+                }
+
+                const { error: txError } = await supabase.from('transactions').insert(transactions);
+                if (txError) console.error("Error generating transactions:", txError);
+            }
+
             setNewService({
                 name: "",
                 client_id: "",
                 amount: "",
                 recurrence: "monthly",
                 is_active: true,
+                installments: "1",
                 next_billing_date: new Date().toISOString().split('T')[0]
             });
         }
@@ -382,10 +411,29 @@ export default function ServicesPage() {
                                             onChange={(e) => setNewService({ ...newService, recurrence: e.target.value })}
                                             className="w-full bg-secondary border border-border rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50"
                                         >
+                                            <option value="monthly">Mensal</option>
+                                            <option value="quarterly">Trimestral</option>
+                                            <option value="semiannual">Semestral</option>
                                             <option value="annual">Anual</option>
+                                            <option value="installment">Parcelado</option>
                                             <option value="one_time">Pagamento Único</option>
                                         </select>
                                     </div>
+
+                                    {newService.recurrence === 'installment' && (
+                                        <div>
+                                            <label className="text-sm font-medium mb-1.5 block text-muted-foreground">Parcelas</label>
+                                            <input
+                                                required
+                                                type="number"
+                                                min="2"
+                                                max="60"
+                                                value={newService.installments}
+                                                onChange={(e) => setNewService({ ...newService, installments: e.target.value })}
+                                                className="w-full bg-secondary border border-border rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                            />
+                                        </div>
+                                    )}
                                     <div className="col-span-2">
                                         <label className="text-sm font-medium mb-1.5 block text-muted-foreground">Data de Vencimento</label>
                                         <div className="relative">
