@@ -7,7 +7,8 @@ import {
   CreditCard,
   ArrowUpRight,
   ArrowDownRight,
-  Plus
+  Plus,
+  AlertCircle
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -18,7 +19,11 @@ export default function Dashboard() {
   const [metrics, setMetrics] = useState({
     clientsCount: 0,
     monthlyRevenue: 0,
-    activeServices: 0
+    activeServices: 0,
+    totalReceived: 0,
+    totalPending: 0,
+    overdueCount: 0,
+    onTimeCount: 0
   });
   const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,63 +35,140 @@ export default function Dashboard() {
   async function fetchDashboardData() {
     setLoading(true);
 
-    // 1. Fetch total clients
-    const { count: clientsCount } = await supabase
-      .from("clients")
-      .select("*", { count: 'exact', head: true });
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
 
-    // 2. Fetch active services and calculate revenue
-    const { data: services } = await supabase
-      .from("services")
-      .select("amount, recurrence")
-      .eq("is_active", true);
+      const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
 
-    let revenue = 0;
-    services?.forEach(s => {
-      revenue += calculateMRR(Number(s.amount), s.recurrence as any);
-    });
+      // 1. Fetch total clients
+      const { count: clientsCount } = await supabase
+        .from("clients")
+        .select("*", { count: 'exact', head: true });
 
-    // 3. Fetch recent transactions (dummy for now as we haven't implemented logic to populate it yet)
-    // In a real app, a trigger or cron job would generate transactions
-    const { data: transactions } = await supabase
-      .from("transactions")
-      .select(`
-        *,
-        services ( name, clients ( name ) )
-      `)
-      .order("created_at", { ascending: false })
-      .limit(5);
+      // 2. Fetch active services
+      const { data: services } = await supabase
+        .from("services")
+        .select(`
+          *,
+          clients ( id, name )
+        `)
+        .eq("is_active", true);
 
-    setMetrics({
-      clientsCount: clientsCount || 0,
-      monthlyRevenue: revenue,
-      activeServices: services?.length || 0
-    });
-    setRecentTransactions(transactions || []);
-    setLoading(false);
+      let mrr = 0;
+      services?.forEach(s => {
+        mrr += calculateMRR(Number(s.amount), s.recurrence as any);
+      });
+
+      // 3. Fetch transactions for the current month
+      const { data: monthTransactions } = await supabase
+        .from("transactions")
+        .select("*")
+        .gte("due_date", firstDayOfMonth.toISOString().split('T')[0])
+        .lte("due_date", lastDayOfMonth.toISOString().split('T')[0]);
+
+      let received = 0;
+      let pending = 0;
+      monthTransactions?.forEach(t => {
+        if (t.status === 'pago') {
+          received += Number(t.amount);
+        } else {
+          pending += Number(t.amount);
+        }
+      });
+
+      // 4. Calculate Overdue vs On-time clients
+      // A client is overdue if they have at least one service overdue
+      const clientStatusMap = new Map<string, 'on-time' | 'overdue'>();
+      const startOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+
+      services?.forEach(service => {
+        const billingDate = new Date(service.next_billing_date);
+        billingDate.setHours(0, 0, 0, 0);
+
+        // Ignore future services for current status counts
+        if (billingDate >= startOfNextMonth) return;
+
+        if (!clientStatusMap.has(service.clients.id)) {
+          clientStatusMap.set(service.clients.id, 'on-time');
+        }
+
+        const hasPaid = (monthTransactions || []).some(t =>
+          t.service_id === service.id && t.status === 'pago'
+          // Also check if paid with the cycle's month/year matching
+          // (matching logic from cobrancas page)
+          && new Date(t.due_date).getMonth() === billingDate.getMonth()
+          && new Date(t.due_date).getFullYear() === billingDate.getFullYear()
+        );
+
+        if (billingDate.getTime() < today.getTime() && !hasPaid) {
+          clientStatusMap.set(service.clients.id, 'overdue');
+        }
+      });
+
+      let overdue = 0;
+      let onTime = 0;
+      clientStatusMap.forEach(status => {
+        if (status === 'overdue') overdue++;
+        else onTime++;
+      });
+
+      // 5. Fetch recent transactions
+      const { data: transactions } = await supabase
+        .from("transactions")
+        .select(`
+          *,
+          services ( name, clients ( name ) )
+        `)
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      setMetrics({
+        clientsCount: clientsCount || 0,
+        monthlyRevenue: mrr,
+        activeServices: services?.length || 0,
+        totalReceived: received,
+        totalPending: pending,
+        overdueCount: overdue,
+        onTimeCount: onTime
+      });
+      setRecentTransactions(transactions || []);
+    } catch (error) {
+      console.error("Dashboard error:", error);
+    } finally {
+      setLoading(false);
+    }
   }
 
   const stats = [
     {
-      label: "Clientes Ativos",
-      value: metrics.clientsCount.toString(),
-      change: "+0%", // Needs historical data for real calculation
+      label: "Receita Realizada (Mês)",
+      value: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(metrics.totalReceived),
+      change: "Real",
+      trending: "up",
+      icon: TrendingUp,
+    },
+    {
+      label: "A Receber (Mês)",
+      value: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(metrics.totalPending),
+      change: "Pendente",
+      trending: "down",
+      icon: CreditCard,
+    },
+    {
+      label: "Clientes em Dia",
+      value: metrics.onTimeCount.toString(),
+      change: "OK",
       trending: "up",
       icon: Users,
     },
     {
-      label: "Receita Mensal Est. (MRR)",
-      value: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(metrics.monthlyRevenue),
-      change: "+0%",
-      trending: "up",
-      icon: CreditCard,
-    },
-    {
-      label: "Serviços Ativos",
-      value: metrics.activeServices.toString(),
-      change: "Stable",
-      trending: "up",
-      icon: TrendingUp,
+      label: "Clientes em Atraso",
+      value: metrics.overdueCount.toString(),
+      change: "Atenção",
+      trending: metrics.overdueCount > 0 ? "down" : "up",
+      icon: AlertCircle,
     },
   ];
 
@@ -108,19 +190,21 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {stats.map((stat) => (
           <div key={stat.label} className="glass-card">
             <div className="flex items-start justify-between">
               <div className="p-2 bg-secondary rounded-lg">
-                <stat.icon className="w-6 h-6 text-primary" />
+                <stat.icon className={cn(
+                  "w-6 h-6",
+                  stat.label === "Clientes em Atraso" && metrics.overdueCount > 0 ? "text-rose-500" : "text-primary"
+                )} />
               </div>
               <div className={cn(
-                "flex items-center gap-1 text-sm font-medium",
-                stat.trending === "up" ? "text-primary" : "text-destructive"
+                "px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider",
+                stat.trending === "up" ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"
               )}>
                 {stat.change}
-                <ArrowUpRight className="w-4 h-4" />
               </div>
             </div>
             <div className="mt-4">
@@ -133,6 +217,35 @@ export default function Dashboard() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="glass-card bg-primary/5 border-primary/20">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-primary/80 uppercase tracking-widest">Receita Mensal Est. (MRR)</p>
+              <p className="text-3xl font-bold mt-1">
+                {loading ? "..." : new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(metrics.monthlyRevenue)}
+              </p>
+            </div>
+            <div className="p-3 bg-primary text-primary-foreground rounded-2xl shadow-lg shadow-primary/20">
+              <TrendingUp className="w-8 h-8" />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground mt-4 leading-relaxed">
+            Baseado em {metrics.activeServices} serviços ativos. O MRR reflete sua receita recorrente previsível.
+          </p>
+        </div>
+
+        <div className="glass-card flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-muted-foreground uppercase tracking-widest">Total de Clientes</p>
+            <p className="text-3xl font-bold mt-1">{loading ? "..." : metrics.clientsCount}</p>
+          </div>
+          <Link href="/clientes" className="p-4 bg-secondary rounded-2xl hover:bg-secondary/80 transition-all group">
+            <Users className="w-8 h-8 text-muted-foreground group-hover:text-foreground transition-colors" />
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -8,8 +8,14 @@ import {
     Settings,
     LogOut,
     CreditCard,
-    Briefcase
+    Briefcase,
+    User,
+    Bell,
+    FileText
 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
+import toast from "react-hot-toast";
 import { cn } from "@/lib/utils";
 
 const menuItems = [
@@ -17,10 +23,24 @@ const menuItems = [
     { icon: Users, label: "Clientes", href: "/clientes" },
     { icon: Briefcase, label: "Serviços", href: "/servicos" },
     { icon: CreditCard, label: "Financeiro", href: "/financeiro" },
+    { icon: Bell, label: "Cobranças", href: "/cobrancas" },
+    { icon: FileText, label: "Templates", href: "/configuracoes/templates" },
+    { icon: User, label: "Perfil", href: "/perfil" },
 ];
 
 export function Sidebar() {
     const pathname = usePathname();
+    const router = useRouter();
+
+    const handleLogout = async () => {
+        const { error } = await supabase.auth.signOut();
+        if (error) {
+            toast.error("Erro ao sair.");
+        } else {
+            toast.success("Até logo!");
+            router.push("/login");
+        }
+    };
 
     return (
         <aside className="w-64 h-screen bg-card border-r border-border flex flex-col fixed left-0 top-0">
@@ -53,11 +73,14 @@ export function Sidebar() {
             </nav>
 
             <div className="p-4 border-t border-border mt-auto">
-                <div className="px-3 py-2 flex items-center gap-3 text-muted-foreground hover:bg-secondary hover:text-foreground transition-all cursor-pointer rounded-md text-sm">
+                <Link href="/perfil" className="px-3 py-2 flex items-center gap-3 text-muted-foreground hover:bg-secondary hover:text-foreground transition-all cursor-pointer rounded-md text-sm">
                     <Settings className="w-5 h-5" />
                     Configurações
-                </div>
-                <div className="px-3 py-2 flex items-center gap-3 text-destructive hover:bg-destructive/10 transition-all cursor-pointer rounded-md mt-1 text-sm">
+                </Link>
+                <div
+                    onClick={handleLogout}
+                    className="px-3 py-2 flex items-center gap-3 text-destructive hover:bg-destructive/10 transition-all cursor-pointer rounded-md mt-1 text-sm"
+                >
                     <LogOut className="w-5 h-5" />
                     Sair
                 </div>

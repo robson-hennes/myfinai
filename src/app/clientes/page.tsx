@@ -21,7 +21,9 @@ import Link from "next/link";
 
 interface Client {
     id: string;
-    name: string;
+    id: string;
+    name: string; // Company Name
+    contact_name: string | null; // Contact Person
     email: string | null;
     phone: string | null;
 }
@@ -33,7 +35,7 @@ export default function ClientsPage() {
     const [isAdding, setIsAdding] = useState(false);
     const [editingClient, setEditingClient] = useState<Client | null>(null);
     const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
-    const [newClient, setNewClient] = useState({ name: "", email: "", phone: "" });
+    const [newClient, setNewClient] = useState({ name: "", contact_name: "", email: "", phone: "" });
 
     useEffect(() => {
         fetchClients();
@@ -63,6 +65,7 @@ export default function ClientsPage() {
             .insert([
                 {
                     name: newClient.name,
+                    contact_name: newClient.contact_name || newClient.name, // Default to name if empty, though UI should encourage it
                     email: newClient.email || null,
                     phone: newClient.phone || null,
                     user_id: (await supabase.auth.getUser()).data.user?.id || "00000000-0000-0000-0000-000000000000"
@@ -75,7 +78,7 @@ export default function ClientsPage() {
         } else {
             setClients([...clients, data[0]].sort((a, b) => a.name.localeCompare(b.name)));
             setIsAdding(false);
-            setNewClient({ name: "", email: "", phone: "" });
+            setNewClient({ name: "", contact_name: "", email: "", phone: "" });
         }
     }
 
@@ -83,12 +86,15 @@ export default function ClientsPage() {
         e.preventDefault();
         if (!editingClient || !editingClient.name) return;
 
+        const { data: { user } } = await supabase.auth.getUser();
         const { error } = await supabase
             .from("clients")
             .update({
                 name: editingClient.name,
+                contact_name: editingClient.contact_name,
                 email: editingClient.email,
-                phone: editingClient.phone
+                phone: editingClient.phone,
+                user_id: user?.id
             })
             .eq("id", editingClient.id);
 
@@ -111,9 +117,16 @@ export default function ClientsPage() {
         if (error) {
             console.error("Error deleting client:", error);
         } else {
-            setClients(clients.filter(c => c.id !== id));
+            // Refresh the client list to ensure UI consistency
+            await fetchClients();
         }
     }
+
+
+
+
+
+
 
     const filteredClients = clients.filter(client =>
         client.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -209,7 +222,12 @@ export default function ClientsPage() {
                                     </div>
                                 </div>
                                 <div className="mt-4">
-                                    <h3 className="font-bold text-lg truncate">{client.name}</h3>
+                                    <h3 className="font-bold text-lg truncate" title={client.name}>{client.name}</h3>
+                                    {client.contact_name && client.contact_name !== client.name && (
+                                        <p className="text-sm text-primary/80 font-medium truncate mb-2">
+                                            Contato: {client.contact_name}
+                                        </p>
+                                    )}
                                     <div className="space-y-2 mt-3">
                                         {client.email && (
                                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -243,7 +261,8 @@ export default function ClientsPage() {
                             <table className="w-full text-left border-collapse">
                                 <thead>
                                     <tr className="border-b border-border bg-secondary/30">
-                                        <th className="py-3 px-6 font-semibold text-sm">Cliente</th>
+                                        <th className="py-3 px-6 font-semibold text-sm">Empresa / Cliente</th>
+                                        <th className="py-3 px-6 font-semibold text-sm">Contato</th>
                                         <th className="py-3 px-6 font-semibold text-sm">E-mail</th>
                                         <th className="py-3 px-6 font-semibold text-sm">Telefone</th>
                                         <th className="py-3 px-6 font-semibold text-sm text-right">Ações</th>
@@ -259,6 +278,9 @@ export default function ClientsPage() {
                                                     </div>
                                                     <span className="font-medium text-sm">{client.name}</span>
                                                 </div>
+                                            </td>
+                                            <td className="py-4 px-6 text-sm text-muted-foreground">
+                                                {client.contact_name || "-"}
                                             </td>
                                             <td className="py-4 px-6 text-sm text-muted-foreground">
                                                 {client.email || "-"}
@@ -391,13 +413,24 @@ export default function ClientsPage() {
                         </div>
                         <form onSubmit={handleUpdateClient} className="space-y-4">
                             <div>
-                                <label className="text-sm font-medium mb-1.5 block text-muted-foreground">Nome Completo</label>
+                                <label className="text-sm font-medium mb-1.5 block text-muted-foreground">Nome da Empresa</label>
                                 <input
                                     autoFocus
                                     required
                                     type="text"
                                     value={editingClient.name}
                                     onChange={(e) => setEditingClient({ ...editingClient, name: e.target.value })}
+                                    className="w-full bg-secondary border border-border rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                    placeholder="Ex: Empresa LTDA"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-sm font-medium mb-1.5 block text-muted-foreground">Nome do Contato</label>
+                                <input
+                                    required
+                                    type="text"
+                                    value={editingClient.contact_name || ""}
+                                    onChange={(e) => setEditingClient({ ...editingClient, contact_name: e.target.value })}
                                     className="w-full bg-secondary border border-border rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50"
                                     placeholder="Ex: João Silva"
                                 />
