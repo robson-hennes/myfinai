@@ -116,12 +116,28 @@ export default function Dashboard() {
         if (billingDate < today) {
           // Check if there's a payment for this service in the billing month
           const hasPaid = (allTransactions || []).some(t => {
-            if (t.service_id !== service.id) return false;
+            // Verificar se é pago
             if (t.status !== 'pago' && t.status !== 'paid') return false;
             
             const txDate = new Date(t.due_date);
-            return txDate.getMonth() === billingDate.getMonth() 
-              && txDate.getFullYear() === billingDate.getFullYear();
+            const txMonth = txDate.getMonth();
+            const txYear = txDate.getFullYear();
+            const billingMonth = billingDate.getMonth();
+            const billingYear = billingDate.getFullYear();
+            
+            // Verificar se é do mesmo mês/ano
+            if (txMonth !== billingMonth || txYear !== billingYear) return false;
+            
+            // Opção 1: Transação vinculada ao serviço
+            if (t.service_id === service.id) return true;
+            
+            // Opção 2: Transação manual com valor e data correspondentes
+            // (para transações criadas manualmente sem service_id)
+            if (!t.service_id && Number(t.amount) === Number(service.amount)) {
+              return true;
+            }
+            
+            return false;
           });
 
           // If not paid and overdue, mark client as overdue
