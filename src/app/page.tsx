@@ -43,12 +43,16 @@ export default function Dashboard() {
       const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
 
       // 1. Fetch total clients
-      const { count: clientsCount } = await supabase
+      const { count: clientsCount, error: clientsError } = await supabase
         .from("clients")
         .select("*", { count: 'exact', head: true });
 
+      if (clientsError) {
+        console.error("Error fetching clients:", clientsError);
+      }
+
       // 2. Fetch active services
-      const { data: services } = await supabase
+      const { data: services, error: servicesError } = await supabase
         .from("services")
         .select(`
           *,
@@ -56,55 +60,76 @@ export default function Dashboard() {
         `)
         .eq("is_active", true);
 
+      if (servicesError) {
+        console.error("Error fetching services:", servicesError);
+      }
+
       let mrr = 0;
       services?.forEach(s => {
         mrr += calculateMRR(Number(s.amount), s.recurrence as any);
       });
 
-      // 3. Fetch transactions for the current month
-      const { data: monthTransactions } = await supabase
+      // 3. Fetch ALL transactions (not just current month) to properly calculate status
+      const { data: allTransactions, error: transactionsError } = await supabase
         .from("transactions")
-        .select("*")
-        .gte("due_date", firstDayOfMonth.toISOString().split('T')[0])
-        .lte("due_date", lastDayOfMonth.toISOString().split('T')[0]);
+        .select("*");
+
+      if (transactionsError) {
+        console.error("Error fetching transactions:", transactionsError);
+      }
+
+      // Filter transactions for current month
+      const monthTransactions = allTransactions?.filter(t => {
+        const dueDate = new Date(t.due_date);
+        return dueDate >= firstDayOfMonth && dueDate <= lastDayOfMonth;
+      }) || [];
 
       let received = 0;
       let pending = 0;
-      monthTransactions?.forEach(t => {
-        if (t.status === 'pago') {
-          received += Number(t.amount);
-        } else {
-          pending += Number(t.amount);
+      
+      monthTransactions.forEach(t => {
+        const amount = Number(t.amount);
+        // Check both 'pago' and 'paid' for compatibility
+        if (t.status === 'pago' || t.status === 'paid') {
+          received += amount;
+        } else if (t.status === 'pending' || t.status === 'pendente') {
+          pending += amount;
         }
       });
 
       // 4. Calculate Overdue vs On-time clients
-      // A client is overdue if they have at least one service overdue
       const clientStatusMap = new Map<string, 'on-time' | 'overdue'>();
-      const startOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-
+      
+      // Get all clients with active services
       services?.forEach(service => {
+        const clientId = service.clients.id;
+        
         const billingDate = new Date(service.next_billing_date);
         billingDate.setHours(0, 0, 0, 0);
 
-        // Ignore future services for current status counts
-        if (billingDate >= startOfNextMonth) return;
-
-        if (!clientStatusMap.has(service.clients.id)) {
-          clientStatusMap.set(service.clients.id, 'on-time');
+        // Initialize client as on-time if not already in map
+        if (!clientStatusMap.has(clientId)) {
+          clientStatusMap.set(clientId, 'on-time');
         }
 
-        const hasPaid = (monthTransactions || []).some(t =>
-          t.service_id === service.id && t.status === 'pago'
-          // Also check if paid with the cycle's month/year matching
-          // (matching logic from cobrancas page)
-          && new Date(t.due_date).getMonth() === billingDate.getMonth()
-          && new Date(t.due_date).getFullYear() === billingDate.getFullYear()
-        );
+        // Only check if billing date is in the PAST (overdue)
+        if (billingDate < today) {
+          // Check if there's a payment for this service in the billing month
+          const hasPaid = (allTransactions || []).some(t => {
+            if (t.service_id !== service.id) return false;
+            if (t.status !== 'pago' && t.status !== 'paid') return false;
+            
+            const txDate = new Date(t.due_date);
+            return txDate.getMonth() === billingDate.getMonth() 
+              && txDate.getFullYear() === billingDate.getFullYear();
+          });
 
-        if (billingDate.getTime() < today.getTime() && !hasPaid) {
-          clientStatusMap.set(service.clients.id, 'overdue');
+          // If not paid and overdue, mark client as overdue
+          if (!hasPaid) {
+            clientStatusMap.set(clientId, 'overdue');
+          }
         }
+        // If billing date is today or future, client is on-time for this service
       });
 
       let overdue = 0;
@@ -114,15 +139,22 @@ export default function Dashboard() {
         else onTime++;
       });
 
-      // 5. Fetch recent transactions
-      const { data: transactions } = await supabase
+      // 5. Fetch recent transactions with proper error handling
+      const { data: transactions, error: recentTxError } = await supabase
         .from("transactions")
         .select(`
           *,
-          services ( name, clients ( name ) )
+          services ( 
+            name, 
+            clients ( name ) 
+          )
         `)
         .order("created_at", { ascending: false })
         .limit(5);
+
+      if (recentTxError) {
+        console.error("Error fetching recent transactions:", recentTxError);
+      }
 
       setMetrics({
         clientsCount: clientsCount || 0,

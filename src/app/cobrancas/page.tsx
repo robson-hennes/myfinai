@@ -15,6 +15,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/billing";
 import { cn } from "@/lib/utils";
+import { generateMonthlyTransactions } from "@/lib/transactions";
 import Link from "next/link";
 import toast from "react-hot-toast";
 
@@ -39,6 +40,7 @@ export default function CobrançasPage() {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
     const [processingId, setProcessingId] = useState<string | null>(null);
+    const [generatingTransactions, setGeneratingTransactions] = useState(false);
 
     useEffect(() => {
         fetchData();
@@ -150,6 +152,25 @@ export default function CobrançasPage() {
         }
     };
 
+    const handleGenerateTransactions = async () => {
+        setGeneratingTransactions(true);
+        try {
+            const result = await generateMonthlyTransactions();
+            
+            if (result.success) {
+                toast.success(result.message || 'Transações geradas com sucesso!');
+                // Recarregar dados
+                await fetchData();
+            } else {
+                toast.error(result.error || 'Erro ao gerar transações');
+            }
+        } catch (error: any) {
+            toast.error('Erro ao gerar transações: ' + error.message);
+        } finally {
+            setGeneratingTransactions(false);
+        }
+    };
+
     const filteredServices = services.filter(s =>
         s.clients.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         s.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -168,6 +189,23 @@ export default function CobrançasPage() {
                     </h1>
                     <p className="text-muted-foreground">Monitore o status de pagamento e envie notificações manuais.</p>
                 </div>
+                <button
+                    onClick={handleGenerateTransactions}
+                    disabled={generatingTransactions}
+                    className="bg-primary text-primary-foreground px-4 py-2 rounded-md font-medium flex items-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-50"
+                >
+                    {generatingTransactions ? (
+                        <>
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            Gerando...
+                        </>
+                    ) : (
+                        <>
+                            <Calendar className="w-5 h-5" />
+                            Gerar Transações do Mês
+                        </>
+                    )}
+                </button>
             </div>
 
             <div className="flex flex-col md:flex-row gap-4">
