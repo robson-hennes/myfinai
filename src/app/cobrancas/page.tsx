@@ -64,11 +64,10 @@ export default function CobrançasPage() {
 
             if (sError) throw sError;
 
-            // 2. Fetch recent transactions to check payment status
+            // 2. Fetch ALL transactions to check payment status
             const { data: transactionsData, error: tError } = await supabase
                 .from('transactions')
-                .select('*')
-                .eq('status', 'pago');
+                .select('*');
 
             if (tError) throw tError;
 
@@ -83,11 +82,29 @@ export default function CobrançasPage() {
                 billingDate.setHours(0, 0, 0, 0);
 
                 // Check if paid in the same month/year
-                const hasPaid = (transactionsData || []).some(t =>
-                    t.service_id === service.id &&
-                    new Date(t.due_date).getMonth() === billingDate.getMonth() &&
-                    new Date(t.due_date).getFullYear() === billingDate.getFullYear()
-                );
+                const hasPaid = (transactionsData || []).some(t => {
+                    // Verificar se é pago
+                    if (t.status !== 'pago' && t.status !== 'paid') return false;
+                    
+                    const txDate = new Date(t.due_date);
+                    const txMonth = txDate.getMonth();
+                    const txYear = txDate.getFullYear();
+                    const billingMonth = billingDate.getMonth();
+                    const billingYear = billingDate.getFullYear();
+                    
+                    // Verificar se é do mesmo mês/ano
+                    if (txMonth !== billingMonth || txYear !== billingYear) return false;
+                    
+                    // Opção 1: Transação vinculada ao serviço
+                    if (t.service_id === service.id) return true;
+                    
+                    // Opção 2: Transação manual com valor e data correspondentes
+                    if (!t.service_id && Number(t.amount) === Number(service.amount)) {
+                        return true;
+                    }
+                    
+                    return false;
+                });
 
                 const isOverdue = billingDate.getTime() < today.getTime() && !hasPaid;
                 const isPaid = hasPaid;
